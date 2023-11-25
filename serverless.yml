@@ -1,0 +1,61 @@
+service: timeout-alarm-demo
+
+frameworkVersion: ^3.31.0
+configValidationMode: error
+
+package:
+  excludeDevDependencies: true
+  patterns:
+    - '!./**'
+    - './index.js'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'sa-east-1'}
+  versionFunctions: false
+functions:
+  main:
+    handler: index.handler
+    timeout: 5
+
+resources:
+  Resources:
+    # CloudWatch Metric Filter for Lambda Timeout
+    LambdaTimeoutMetricFilter:
+      Type: 'AWS::Logs::MetricFilter'
+      Properties:
+        LogGroupName: !Ref MainLogGroup
+        FilterPattern: '"Task timed out"'
+        MetricTransformations:
+          - MetricValue: '1'
+            MetricNamespace: 'LambdaFunction'
+            MetricName: 'Timeout'
+
+    # CloudWatch Alarm based on the Metric Filter
+    LambdaTimeoutAlarm:
+      Type: 'AWS::CloudWatch::Alarm'
+      Properties:
+        AlarmName: !Sub 'lambda-function-timeout-alarm-${self:provider.stage}'
+        AlarmDescription: 'Alarm when the Lambda function times out'
+        Namespace: 'LambdaFunction'
+        MetricName: 'Timeout'
+        Statistic: 'Sum'
+        Period: 300
+        EvaluationPeriods: 1
+        Threshold: 1
+        ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+        AlarmActions:
+          - Ref: TimeoutNotificationTopic
+
+    # SNS Topic for Notifications
+    TimeoutNotificationTopic:
+      Type: 'AWS::SNS::Topic'
+      Properties:
+        DisplayName: 'Lambda Timeout Notifications'
+
+  Outputs:
+    TimeoutNotificationTopicARN:
+      Description: 'ARN of the SNS topic for timeout notifications'
+      Value: !Ref TimeoutNotificationTopic
